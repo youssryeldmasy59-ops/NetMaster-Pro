@@ -61,44 +61,87 @@ def detect_network_info():
 
 detect_network_info()
 
-# Known Vendors Prefix Cache
+# Known Vendors Prefix Cache (with brand-specific Arabic naming)
 VENDOR_CACHE = {
-    "5c:e9:31": "TP-Link Systems (Router)",
-    "9c:6b:72": "Realme / Oppo Smartphone",
-    "f2:e2:a8": "Apple Mac / Private Wi-Fi",
-    "9e:55:7b": "Apple iPhone / iPad",
-    "56:51:10": "Android / Smart Device",
-    "16:61:c8": "Mobile / Private Wi-Fi",
-    "3c:22:fb": "Apple Device",
-    "dc:a6:32": "Raspberry Pi",
-    "00:1a:2b": "Cisco Systems",
+    "5c:e9:31": "راوتر تي بي لينك (TP-Link Router)",
+    "00:b5:d0": "سامسونج جالاكسي (Samsung Galaxy)",
+    "9c:6b:72": "موبايل ريلمي (Realme Smartphone)",
+    "f2:e2:a8": "لابتوب أبل ماك (هذا الماك)",
+    "9e:55:7b": "أبل آيفون / آيباد (Apple iPhone)",
+    "56:51:10": "موبايل شاومي / أندرويد (Xiaomi / Android)",
+    "16:61:c8": "هاتف أندرويد ذكي (Android Phone)",
+    "3c:22:fb": "جهاز أبل (Apple Device)",
+    "00:ec:0a": "شاومي ريدمي (Xiaomi Redmi)",
+    "64:09:80": "شاومي (Xiaomi Device)",
+    "c4:0b:cb": "أوبو / ريلمي (Oppo / Realme)",
+    "40:40:a7": "سامسونج (Samsung Device)",
+    "dc:a6:32": "راسبيري باي (Raspberry Pi)",
 }
 
-def resolve_vendor(mac: str) -> str:
+# Custom device names storage
+CUSTOM_NAMES_FILE = os.path.join(os.path.dirname(__file__), "custom_names.json")
+CUSTOM_NAMES = {}
+
+def load_custom_names():
+    global CUSTOM_NAMES
+    try:
+        if os.path.exists(CUSTOM_NAMES_FILE):
+            with open(CUSTOM_NAMES_FILE, "r", encoding="utf-8") as f:
+                CUSTOM_NAMES = json.load(f)
+    except Exception as e:
+        print(f"[!] Error loading custom names: {e}")
+
+def save_custom_names():
+    try:
+        with open(CUSTOM_NAMES_FILE, "w", encoding="utf-8") as f:
+            json.dump(CUSTOM_NAMES, f, ensure_ascii=False, indent=2)
+    except Exception as e:
+        print(f"[!] Error saving custom names: {e}")
+
+load_custom_names()
+
+def normalize_mac_prefix(mac: str) -> str:
     mac_clean = mac.lower().replace("-", ":")
-    prefix = ":".join(mac_clean.split(":")[:3])
+    parts = mac_clean.split(":")[:3]
+    return ":".join(p.zfill(2) for p in parts)
+
+def resolve_vendor(mac: str) -> str:
+    prefix = normalize_mac_prefix(mac)
     if prefix in VENDOR_CACHE:
         return VENDOR_CACHE[prefix]
     
-    # Check if MAC has locally administered bit set (bit 1 of first byte)
+    # Check locally administered MAC bit (Private MAC in modern iPhone/Android)
     try:
-        first_byte = int(mac_clean.split(":")[0], 16)
+        first_byte = int(prefix.split(":")[0], 16)
         if first_byte & 2:
-            return "هاتف ذكي (عنوان MAC خاص/عشوائي)"
+            return "هاتف ذكي حديث (Private Wi-Fi Address)"
     except Exception:
         pass
     return "جهاز متصل بالشبكة"
 
-def resolve_hostname(ip: str) -> str:
+def resolve_hostname(ip: str, mac: str = "") -> str:
+    # 1. Check custom names first
+    if ip in CUSTOM_NAMES:
+        return CUSTOM_NAMES[ip]
+    if mac and mac in CUSTOM_NAMES:
+        return CUSTOM_NAMES[mac]
+
     if ip == GATEWAY_IP:
-        return "راوتر الشبكة الرئيسي (TP-Link VX220-G2v)"
+        return "راوتر تي بي لينك الرئيسي (TP-Link VX220-G2v)"
     if ip == MY_IP:
-        return "جهازك الحالي (هذا الماك)"
+        return "لابتوب أبل ماك (هذا الماك)"
+    
+    # 2. Check brand by MAC
+    if mac:
+        prefix = normalize_mac_prefix(mac)
+        if prefix in VENDOR_CACHE:
+            return VENDOR_CACHE[prefix]
+
     try:
         host, _, _ = socket.gethostbyaddr(ip)
         return host
     except Exception:
-        return f"Device-{ip.split('.')[-1]}"
+        return f"هاتف ذكي ({ip.split('.')[-1]})"
 
 def scan_network_worker():
     global SCANNING, GATEWAY_MAC
@@ -150,7 +193,7 @@ def scan_network_worker():
                     GATEWAY_MAC = mac
 
                 vendor = resolve_vendor(mac)
-                hostname = resolve_hostname(ip)
+                hostname = resolve_hostname(ip, mac)
 
                 # Ping latency
                 latency = 1.0
@@ -328,6 +371,20 @@ def throttle_device(req: ThrottleRequest):
             "message": f"تم تعيين حد {req.rate_kbps} Kbps. تنبيه: يتطلب تشغيل السيرفر بـ sudo ./run.sh لخنق السرعة الفعلي."
         }
     return {"status": "ok", "message": f"تم تقييد سرعة الجهاز {req.ip} إلى {req.rate_kbps} Kbps"}
+
+class RenameRequest(BaseModel):
+    ip: str
+    custom_name: str
+
+@app.post("/api/rename")
+def rename_device(req: RenameRequest):
+    CUSTOM_NAMES[req.ip] = req.custom_name.strip()
+    if req.ip in DEVICES:
+        DEVICES[req.ip]["hostname"] = req.custom_name.strip()
+        if DEVICES[req.ip].get("mac"):
+            CUSTOM_NAMES[DEVICES[req.ip]["mac"]] = req.custom_name.strip()
+    save_custom_names()
+    return {"status": "ok", "message": f"تم تغيير اسم الجهاز إلى: {req.custom_name}"}
 
 # Serve Frontend
 @app.get("/", response_class=HTMLResponse)

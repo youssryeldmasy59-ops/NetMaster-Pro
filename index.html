@@ -337,6 +337,23 @@
             }
         }
 
+        async function promptRename(ip, currentName) {
+            const newName = prompt(`اكتب الاسم والنوع لهذا الجهاز (${ip}):\nمثال: موبايل شاومي، سامسونج الصالة، ريلمي محمد`, currentName);
+            if (!newName || !newName.trim()) return;
+            try {
+                const res = await fetch(API_BASE + '/api/rename', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ip, custom_name: newName.trim()})
+                });
+                const data = await res.json();
+                showToast(data.message);
+                fetchDevices();
+            } catch(e) {
+                alert('فشل حفظ الاسم الجديد');
+            }
+        }
+
         async function triggerScan() {
             const icon = document.getElementById('scan-icon');
             icon.classList.add('fa-spin');
@@ -415,7 +432,14 @@
                                             <i class="${getDeviceIcon(d.vendor, d.is_gateway, d.is_me)}"></i>
                                         </div>
                                         <div>
-                                            <h4 class="font-bold text-white text-sm truncate max-w-[160px]">${d.hostname}</h4>
+                                            <div class="flex items-center gap-1.5">
+                                                <h4 class="font-bold text-white text-sm truncate max-w-[140px]">${d.hostname}</h4>
+                                                ${!isProtected ? `
+                                                    <button onclick="promptRename('${d.ip}', '${d.hostname}')" class="text-slate-400 hover:text-cyan-400 p-0.5 text-xs transition-colors" title="تسمية الجهاز">
+                                                        <i class="fa-solid fa-pen-to-square"></i>
+                                                    </button>
+                                                ` : ''}
+                                            </div>
                                             <p class="text-[11px] text-slate-400 font-mono">${d.ip}</p>
                                         </div>
                                     </div>
