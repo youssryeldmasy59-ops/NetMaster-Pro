@@ -16,7 +16,13 @@ echo "=================================================="
 ) &
 ARP_PID=$!
 
-trap "kill $ARP_PID 2>/dev/null; exit" SIGINT SIGTERM EXIT
+# Start Cloudflare Tunnel for public HTTPS access
+(
+  cloudflared tunnel --url http://localhost:8080 2>&1 | tee /tmp/cloudflared.log
+) &
+CF_PID=$!
+
+trap "kill $ARP_PID $CF_PID 2>/dev/null; exit" SIGINT SIGTERM EXIT
 
 # Check if uv is installed
 if ! command -v uv &> /dev/null; then
@@ -25,12 +31,18 @@ if ! command -v uv &> /dev/null; then
     source $HOME/.cargo/env
 fi
 
-echo "[*] الخادم يعمل الآن على الرابط: http://localhost:8080"
-echo "[*] للتحكم الكامل وقطع النت عن الأجهزة: يفضل تشغيل الأمر بـ sudo ./run.sh"
+# Extract public URL
+sleep 2
+PUBLIC_URL=$(grep -o "https://[a-zA-Z0-9.-]*\.trycloudflare\.com" /tmp/cloudflared.log 2>/dev/null | head -n 1)
+
+echo "=================================================="
+echo "🌐 رابط الموقع الأونلاين العام (من أي مكان/موبايل):"
+echo "👉 $PUBLIC_URL"
+echo "🏠 الرابط المحلي (Local): http://localhost:8080"
 echo "=================================================="
 
-# Open browser after 1.5 seconds
-(sleep 1.5 && open "http://localhost:8080") &
+# Open browser with public URL
+(sleep 1.5 && open "${PUBLIC_URL:-http://localhost:8080}") &
 
 # Run server with uv
 uv run --with fastapi --with uvicorn --with scapy python3 app.py
