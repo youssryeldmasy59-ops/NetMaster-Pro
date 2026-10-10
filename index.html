@@ -1,0 +1,474 @@
+<!DOCTYPE html>
+<html lang="ar" dir="rtl">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>NetMaster Pro - لوحة تحكم الشبكة والراوتر</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Cairo -->
+    <link href="https://fonts.googleapis.com/css2?family=Cairo:wght@400;600;700;900&display=swap" rel="stylesheet">
+    <!-- Font Awesome -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <style>
+        body {
+            font-family: 'Cairo', sans-serif;
+            background-color: #0b0f19;
+            color: #f1f5f9;
+        }
+        .glass-panel {
+            background: rgba(17, 24, 39, 0.75);
+            backdrop-filter: blur(16px);
+            border: 1px solid rgba(255, 255, 255, 0.08);
+        }
+        .glass-card {
+            background: rgba(30, 41, 59, 0.6);
+            backdrop-filter: blur(12px);
+            border: 1px solid rgba(255, 255, 255, 0.06);
+            transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        }
+        .glass-card:hover {
+            border-color: rgba(99, 102, 241, 0.4);
+            transform: translateY(-2px);
+        }
+        .badge-pulse {
+            animation: pulse-glow 2s infinite;
+        }
+        @keyframes pulse-glow {
+            0%, 100% { opacity: 1; transform: scale(1); }
+            50% { opacity: 0.6; transform: scale(0.95); }
+        }
+    </style>
+</head>
+<body class="min-h-screen antialiased selection:bg-indigo-500 selection:text-white">
+
+    <!-- Navbar -->
+    <header class="sticky top-0 z-50 glass-panel border-b border-slate-800 px-6 py-4">
+        <div class="max-w-7xl mx-auto flex flex-col md:flex-row items-center justify-between gap-4">
+            <div class="flex items-center gap-3">
+                <div class="w-11 h-11 rounded-2xl bg-gradient-to-tr from-indigo-600 to-cyan-500 flex items-center justify-center shadow-lg shadow-indigo-500/20">
+                    <i class="fa-solid fa-network-wired text-xl text-white"></i>
+                </div>
+                <div>
+                    <h1 class="text-xl font-black tracking-tight text-white flex items-center gap-2">
+                        NetMaster Pro
+                        <span class="text-xs px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 font-semibold border border-indigo-500/30">v2.0</span>
+                    </h1>
+                    <p class="text-xs text-slate-400">داشبورد التحكم الشامل في سرعة وأجهزة الشبكة والراوتر</p>
+                </div>
+            </div>
+
+            <!-- Stats Bar -->
+            <div class="flex flex-wrap items-center gap-3 text-xs">
+                <div class="px-3.5 py-2 rounded-xl bg-slate-800/80 border border-slate-700/60 flex items-center gap-2">
+                    <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 badge-pulse"></span>
+                    <span class="text-slate-400">الراوتر:</span>
+                    <span class="font-bold text-slate-200" id="router-name">TP-Link VX220-G2v</span>
+                </div>
+                <div class="px-3.5 py-2 rounded-xl bg-slate-800/80 border border-slate-700/60 flex items-center gap-2">
+                    <i class="fa-solid fa-laptop text-indigo-400"></i>
+                    <span class="text-slate-400">الأجهزة:</span>
+                    <span class="font-bold text-indigo-300" id="device-count">0</span>
+                </div>
+                <div class="px-3.5 py-2 rounded-xl bg-rose-950/40 border border-rose-800/50 flex items-center gap-2">
+                    <i class="fa-solid fa-ban text-rose-400"></i>
+                    <span class="text-slate-400">المحظورة:</span>
+                    <span class="font-bold text-rose-300" id="blocked-count">0</span>
+                </div>
+                <button onclick="triggerScan()" id="scan-btn" class="px-4 py-2 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 hover:from-indigo-500 hover:to-cyan-500 text-white font-bold text-xs flex items-center gap-2 shadow-lg shadow-indigo-600/25 transition-all">
+                    <i class="fa-solid fa-rotate text-sm" id="scan-icon"></i>
+                    <span>فحص الشبكة</span>
+                </button>
+                <a href="http://192.168.1.1" target="_blank" class="px-4 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold text-xs flex items-center gap-2 transition-all">
+                    <i class="fa-solid fa-arrow-up-right-from-square text-cyan-400"></i>
+                    <span>فتح الراوتر (192.168.1.1)</span>
+                </a>
+            </div>
+        </div>
+    </header>
+
+    <!-- Main Content -->
+    <main class="max-w-7xl mx-auto px-6 py-8 space-y-8">
+
+        <!-- Router Banner & Notice -->
+        <div class="glass-panel rounded-3xl p-6 border border-indigo-500/20 bg-gradient-to-r from-indigo-950/30 via-slate-900 to-cyan-950/20 relative overflow-hidden">
+            <div class="relative z-10 flex flex-col md:flex-row items-start md:items-center justify-between gap-6">
+                <div class="space-y-2">
+                    <div class="flex items-center gap-2">
+                        <span class="px-3 py-1 rounded-lg bg-emerald-500/20 text-emerald-300 text-xs font-bold border border-emerald-500/30 flex items-center gap-1.5">
+                            <i class="fa-solid fa-check-circle"></i>
+                            تم الاتصال بالراوتر بنجاح
+                        </span>
+                        <span class="text-xs text-slate-400">IP: <strong class="text-slate-200" id="gw-ip">192.168.1.1</strong></span>
+                    </div>
+                    <h2 class="text-2xl font-black text-white">راوترك المكتشف: TP-Link VX220-G2v (AX1500)</h2>
+                    <p class="text-sm text-slate-300 max-w-2xl leading-relaxed">
+                        الداشبورد يتيح لك التحكم اللحظي بالأجهزة المتصلة: قطع النت بنقرة زر (NetCut)، تحديد السرعة بالـ Kbps، أو استخدام ميزة هاردوير QoS من إعدادات الراوتر نفسه لتعمل 24/7 دون الحاجة لفتح اللابتوب.
+                    </p>
+                </div>
+                <div class="flex items-center gap-3">
+                    <button onclick="toggleQosGuide()" class="px-5 py-3 rounded-2xl bg-indigo-600/30 hover:bg-indigo-600/40 border border-indigo-500/40 text-indigo-200 font-bold text-sm flex items-center gap-2.5 transition-all">
+                        <i class="fa-solid fa-sliders text-indigo-400"></i>
+                        <span>دليل تحديد السرعة من الراوتر (QoS)</span>
+                    </button>
+                </div>
+            </div>
+        </div>
+
+        <!-- Hardware QoS Interactive Modal / Dropdown -->
+        <div id="qos-guide" class="hidden glass-panel rounded-3xl p-6 border border-cyan-500/30 space-y-4 bg-slate-900/90 transition-all">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-cyan-500/20 text-cyan-400 flex items-center justify-center font-bold text-lg">
+                        <i class="fa-solid fa-microchip"></i>
+                    </div>
+                    <div>
+                        <h3 class="text-lg font-black text-white">خطوات تحديد السرعة الدائمة (QoS) داخل راوتر TP-Link VX220-G2v</h3>
+                        <p class="text-xs text-slate-400">هذه الإعدادات تطبق داخل شريحة الراوتر نفسها وتبقى مفعلة حتى لو جهازك مقفول</p>
+                    </div>
+                </div>
+                <button onclick="toggleQosGuide()" class="text-slate-400 hover:text-white p-2">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+            <div class="grid grid-cols-1 md:grid-cols-4 gap-4 text-sm">
+                <div class="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div class="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-xs">1</div>
+                    <h4 class="font-bold text-white">افتح صفحة الراوتر</h4>
+                    <p class="text-xs text-slate-300 leading-relaxed">
+                        ادخل على <a href="http://192.168.1.1" target="_blank" class="text-cyan-400 underline font-mono">192.168.1.1</a>، واكتب كلمة المرور الموجودة على ظهر الراوتر.
+                    </p>
+                </div>
+                <div class="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div class="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-xs">2</div>
+                    <h4 class="font-bold text-white">ادخل على قائمة QoS</h4>
+                    <p class="text-xs text-slate-300 leading-relaxed">
+                        اضغط على التبويب الأعلى <strong>Advanced (متقدم)</strong> ثم من القائمة الجانبية اختر <strong>QoS</strong>.
+                    </p>
+                </div>
+                <div class="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div class="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-xs">3</div>
+                    <h4 class="font-bold text-white">فعل السرعة الكلية</h4>
+                    <p class="text-xs text-slate-300 leading-relaxed">
+                        ضع علامة صح على <strong>Enable QoS</strong>، وحدد سرعة خطك (مثلاً Download: 30000 Kbps / Upload: 5000 Kbps).
+                    </p>
+                </div>
+                <div class="p-4 rounded-2xl bg-slate-800/60 border border-slate-700/60 space-y-2">
+                    <div class="w-7 h-7 rounded-lg bg-indigo-500/20 text-indigo-300 flex items-center justify-center font-bold text-xs">4</div>
+                    <h4 class="font-bold text-white">حدد الأجهزة وسرعتها</h4>
+                    <p class="text-xs text-slate-300 leading-relaxed">
+                        من جدول <strong>Device Priority</strong>، اختر الجهاز بالـ MAC واضغط Priority أو حدد سقف التحميل (Bandwidth Limit).
+                    </p>
+                </div>
+            </div>
+        </div>
+
+        <!-- Devices Section Header -->
+        <div class="flex items-center justify-between">
+            <div class="space-y-1">
+                <h3 class="text-xl font-black text-white flex items-center gap-2">
+                    <i class="fa-solid fa-wifi text-cyan-400"></i>
+                    الأجهزة المتصلة بالشبكة
+                </h3>
+                <p class="text-xs text-slate-400">تحكم لحظي في سرعة كل جهاز أو اقطع الاتصال عنه مباشرة</p>
+            </div>
+            <div class="flex items-center gap-2">
+                <span class="text-xs text-slate-400">تحديث تلقائي:</span>
+                <span class="w-2 h-2 rounded-full bg-emerald-400 badge-pulse"></span>
+                <span class="text-xs font-semibold text-emerald-400">نشط (كل 4 ثوانٍ)</span>
+            </div>
+        </div>
+
+        <!-- Device Cards Grid -->
+        <div id="devices-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-5">
+            <!-- Loading Skeleton -->
+            <div class="glass-card rounded-3xl p-6 border border-slate-800 space-y-4 animate-pulse">
+                <div class="h-6 bg-slate-800 rounded-xl w-2/3"></div>
+                <div class="h-4 bg-slate-800 rounded-lg w-1/2"></div>
+                <div class="h-10 bg-slate-800 rounded-xl"></div>
+            </div>
+        </div>
+
+    </main>
+
+    <!-- Speed Limit Modal -->
+    <div id="speed-modal" class="hidden fixed inset-0 z-50 bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+        <div class="glass-panel w-full max-w-md rounded-3xl p-6 border border-indigo-500/40 space-y-6">
+            <div class="flex items-center justify-between border-b border-slate-800 pb-4">
+                <div class="flex items-center gap-3">
+                    <div class="w-10 h-10 rounded-xl bg-indigo-500/20 text-indigo-400 flex items-center justify-center font-bold">
+                        <i class="fa-solid fa-gauge-high"></i>
+                    </div>
+                    <div>
+                        <h4 class="font-bold text-white text-base">تحديد سرعة الجهاز</h4>
+                        <p class="text-xs text-slate-400 font-mono" id="modal-ip-display">192.168.1.X</p>
+                    </div>
+                </div>
+                <button onclick="closeSpeedModal()" class="text-slate-400 hover:text-white p-1">
+                    <i class="fa-solid fa-xmark text-lg"></i>
+                </button>
+            </div>
+
+            <div class="space-y-4">
+                <label class="block text-xs font-bold text-slate-300">اختر حد السرعة الأقصى (Download Limit):</label>
+                <div class="grid grid-cols-2 gap-3">
+                    <button onclick="setSpeedLimitPreset(512)" class="p-3 rounded-2xl bg-slate-800 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-500 text-center text-xs font-bold transition-all">
+                        🐢 512 Kbps<br><span class="text-[10px] text-slate-400">(خنق شديد / تصفح فقط)</span>
+                    </button>
+                    <button onclick="setSpeedLimitPreset(1024)" class="p-3 rounded-2xl bg-slate-800 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-500 text-center text-xs font-bold transition-all">
+                        ⚡ 1 Mbps<br><span class="text-[10px] text-slate-400">(واتساب وتصفح خفيف)</span>
+                    </button>
+                    <button onclick="setSpeedLimitPreset(2048)" class="p-3 rounded-2xl bg-slate-800 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-500 text-center text-xs font-bold transition-all">
+                        🚀 2 Mbps<br><span class="text-[10px] text-slate-400">(يوتيوب 480p)</span>
+                    </button>
+                    <button onclick="setSpeedLimitPreset(5120)" class="p-3 rounded-2xl bg-slate-800 hover:bg-indigo-600/30 border border-slate-700 hover:border-indigo-500 text-center text-xs font-bold transition-all">
+                        🏎️ 5 Mbps<br><span class="text-[10px] text-slate-400">(سرعة معتدلة)</span>
+                    </button>
+                </div>
+
+                <div class="pt-2">
+                    <label class="block text-xs font-bold text-slate-400 mb-1">أو حدد قيمة مخصصة (Kbps):</label>
+                    <input type="number" id="custom-speed-input" placeholder="مثال: 1500" class="w-full px-4 py-2.5 rounded-xl bg-slate-900 border border-slate-700 text-white font-mono text-sm focus:outline-none focus:border-indigo-500">
+                </div>
+            </div>
+
+            <div class="flex items-center gap-3 pt-2">
+                <button onclick="applySpeedLimit()" class="flex-1 py-3 rounded-2xl bg-indigo-600 hover:bg-indigo-500 text-white font-bold text-sm shadow-lg shadow-indigo-600/25 transition-all">
+                    تطبيق القيد الآن
+                </button>
+                <button onclick="closeSpeedModal()" class="px-5 py-3 rounded-2xl bg-slate-800 hover:bg-slate-700 text-slate-300 font-semibold text-sm transition-all">
+                    إلغاء
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Toast Notification -->
+    <div id="toast" class="fixed bottom-6 left-6 z-50 transform translate-y-24 opacity-0 transition-all duration-300 px-5 py-3.5 rounded-2xl bg-slate-900/95 border border-indigo-500/40 text-white text-xs font-bold shadow-2xl flex items-center gap-3">
+        <i class="fa-solid fa-bell text-indigo-400 text-sm"></i>
+        <span id="toast-msg">تم تنفيذ الأمر بنجاح</span>
+    </div>
+
+    <script>
+        let currentTargetIp = null;
+
+        function showToast(msg) {
+            const toast = document.getElementById('toast');
+            const toastMsg = document.getElementById('toast-msg');
+            toastMsg.innerText = msg;
+            toast.classList.remove('translate-y-24', 'opacity-0');
+            setTimeout(() => {
+                toast.classList.add('translate-y-24', 'opacity-0');
+            }, 3000);
+        }
+
+        function toggleQosGuide() {
+            const guide = document.getElementById('qos-guide');
+            guide.classList.toggle('hidden');
+        }
+
+        function openSpeedModal(ip) {
+            currentTargetIp = ip;
+            document.getElementById('modal-ip-display').innerText = ip;
+            document.getElementById('speed-modal').classList.remove('hidden');
+        }
+
+        function closeSpeedModal() {
+            document.getElementById('speed-modal').classList.add('hidden');
+            currentTargetIp = null;
+        }
+
+        function setSpeedLimitPreset(kbps) {
+            document.getElementById('custom-speed-input').value = kbps;
+        }
+
+        async function applySpeedLimit() {
+            const speed = parseInt(document.getElementById('custom-speed-input').value);
+            if (!speed || speed <= 0) {
+                alert('برجاء كتابة قيمة سرعة صحيحة');
+                return;
+            }
+            try {
+                const res = await fetch('/api/throttle', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ip: currentTargetIp, rate_kbps: speed})
+                });
+                const data = await res.json();
+                showToast(data.message);
+                closeSpeedModal();
+                fetchDevices();
+            } catch(e) {
+                alert('حدث خطأ أثناء تطبيق السرعة');
+            }
+        }
+
+        async function blockDevice(ip) {
+            if (!confirm(`هل أنت متأكد من قطع النت تماماً عن الجهاز (${ip})؟`)) return;
+            try {
+                const res = await fetch('/api/block', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ip})
+                });
+                const data = await res.json();
+                showToast(data.message);
+                fetchDevices();
+            } catch(e) {
+                alert('فشل قطع الاتصال');
+            }
+        }
+
+        async function unblockDevice(ip) {
+            try {
+                const res = await fetch('/api/unblock', {
+                    method: 'POST',
+                    headers: {'Content-Type': 'application/json'},
+                    body: JSON.stringify({ip})
+                });
+                const data = await res.json();
+                showToast(data.message);
+                fetchDevices();
+            } catch(e) {
+                alert('فشل إعادة الاتصال');
+            }
+        }
+
+        async function triggerScan() {
+            const icon = document.getElementById('scan-icon');
+            icon.classList.add('fa-spin');
+            try {
+                const res = await fetch('/api/scan', {method: 'POST'});
+                const data = await res.json();
+                showToast(data.message);
+                setTimeout(fetchDevices, 2000);
+            } catch(e) {
+                console.error(e);
+            } finally {
+                setTimeout(() => icon.classList.remove('fa-spin'), 1500);
+            }
+        }
+
+        function getDeviceIcon(vendor, isRouter, isMe) {
+            if (isRouter) return 'fa-solid fa-server text-cyan-400';
+            if (isMe) return 'fa-solid fa-laptop text-indigo-400';
+            const v = (vendor || '').toLowerCase();
+            if (v.includes('phone') || v.includes('mobile') || v.includes('realme') || v.includes('oppo') || v.includes('apple')) {
+                return 'fa-solid fa-mobile-screen-button text-amber-400';
+            }
+            return 'fa-solid fa-wifi text-slate-400';
+        }
+
+        async function fetchDevices() {
+            try {
+                const [infoRes, devRes] = await Promise.all([
+                    fetch('/api/info'),
+                    fetch('/api/devices')
+                ]);
+                const info = await infoRes.json();
+                const devices = await devRes.json();
+
+                document.getElementById('device-count').innerText = devices.length;
+                document.getElementById('blocked-count').innerText = info.blocked_count;
+                document.getElementById('gw-ip').innerText = info.gateway_ip;
+
+                const container = document.getElementById('devices-container');
+                if (devices.length === 0) {
+                    container.innerHTML = `
+                        <div class="col-span-full text-center py-12 text-slate-400">
+                            <i class="fa-solid fa-spinner fa-spin text-3xl mb-3 text-indigo-400"></i>
+                            <p>جارٍ فحص واكتشاف الأجهزة المتصلة...</p>
+                        </div>
+                    `;
+                    return;
+                }
+
+                container.innerHTML = devices.map(d => {
+                    const isBlocked = (d.status === 'blocked');
+                    const isThrottled = (d.status === 'throttled');
+                    const isProtected = d.is_gateway || d.is_me;
+
+                    let badge = '';
+                    if (d.is_gateway) {
+                        badge = '<span class="px-2.5 py-0.5 rounded-full bg-cyan-500/20 text-cyan-300 text-[10px] font-bold border border-cyan-500/30">الراوتر الرئيسي</span>';
+                    } else if (d.is_me) {
+                        badge = '<span class="px-2.5 py-0.5 rounded-full bg-indigo-500/20 text-indigo-300 text-[10px] font-bold border border-indigo-500/30">جهازك الحالي</span>';
+                    } else if (isBlocked) {
+                        badge = '<span class="px-2.5 py-0.5 rounded-full bg-rose-500/20 text-rose-300 text-[10px] font-bold border border-rose-500/30">مقطوع عنه النت 🚫</span>';
+                    } else if (isThrottled) {
+                        badge = `<span class="px-2.5 py-0.5 rounded-full bg-amber-500/20 text-amber-300 text-[10px] font-bold border border-amber-500/30">محدد السرعة (${d.speed_limit} Kbps) ⚡</span>`;
+                    } else {
+                        badge = '<span class="px-2.5 py-0.5 rounded-full bg-emerald-500/20 text-emerald-300 text-[10px] font-bold border border-emerald-500/30">متصل (طبيعي)</span>';
+                    }
+
+                    const cardBorder = isBlocked ? 'border-rose-500/50 bg-rose-950/20' : (isThrottled ? 'border-amber-500/40 bg-amber-950/15' : 'border-slate-800');
+
+                    return `
+                        <div class="glass-card rounded-3xl p-5 border ${cardBorder} flex flex-col justify-between space-y-4">
+                            <div class="space-y-3">
+                                <div class="flex items-start justify-between gap-3">
+                                    <div class="flex items-center gap-3">
+                                        <div class="w-11 h-11 rounded-2xl bg-slate-800/80 border border-slate-700/60 flex items-center justify-center text-lg">
+                                            <i class="${getDeviceIcon(d.vendor, d.is_gateway, d.is_me)}"></i>
+                                        </div>
+                                        <div>
+                                            <h4 class="font-bold text-white text-sm truncate max-w-[160px]">${d.hostname}</h4>
+                                            <p class="text-[11px] text-slate-400 font-mono">${d.ip}</p>
+                                        </div>
+                                    </div>
+                                    ${badge}
+                                </div>
+
+                                <div class="bg-slate-900/60 rounded-2xl p-3 border border-slate-800/60 text-[11px] space-y-1.5 font-mono">
+                                    <div class="flex justify-between text-slate-400">
+                                        <span>MAC:</span>
+                                        <span class="text-slate-300 uppercase">${d.mac}</span>
+                                    </div>
+                                    <div class="flex justify-between text-slate-400">
+                                        <span>النوع:</span>
+                                        <span class="text-indigo-300 font-sans text-right">${d.vendor}</span>
+                                    </div>
+                                    <div class="flex justify-between text-slate-400">
+                                        <span>الاستجابة (Ping):</span>
+                                        <span class="text-emerald-400">${d.latency} ms</span>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- Actions -->
+                            <div class="pt-2 border-t border-slate-800/60 flex items-center gap-2">
+                                ${isProtected ? `
+                                    <span class="text-xs text-slate-500 italic text-center w-full py-1.5">جهاز محمي (نظامي)</span>
+                                ` : `
+                                    ${isBlocked || isThrottled ? `
+                                        <button onclick="unblockDevice('${d.ip}')" class="flex-1 py-2 rounded-xl bg-emerald-600/30 hover:bg-emerald-600/40 border border-emerald-500/40 text-emerald-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-all">
+                                            <i class="fa-solid fa-rotate-left"></i>
+                                            <span>إعادة الاتصال</span>
+                                        </button>
+                                    ` : `
+                                        <button onclick="openSpeedModal('${d.ip}')" class="flex-1 py-2 rounded-xl bg-indigo-600/30 hover:bg-indigo-600/40 border border-indigo-500/40 text-indigo-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-all">
+                                            <i class="fa-solid fa-gauge-high"></i>
+                                            <span>تحديد السرعة</span>
+                                        </button>
+                                        <button onclick="blockDevice('${d.ip}')" class="flex-1 py-2 rounded-xl bg-rose-600/30 hover:bg-rose-600/40 border border-rose-500/40 text-rose-300 font-bold text-xs flex items-center justify-center gap-1.5 transition-all">
+                                            <i class="fa-solid fa-ban"></i>
+                                            <span>قطع النت</span>
+                                        </button>
+                                    `}
+                                `}
+                            </div>
+                        </div>
+                    `;
+                }).join('');
+
+            } catch(e) {
+                console.error("Error fetching devices:", e);
+            }
+        }
+
+        // Initial Load & Polling
+        fetchDevices();
+        setInterval(fetchDevices, 4000);
+    </script>
+</body>
+</html>
