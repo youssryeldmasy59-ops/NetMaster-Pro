@@ -31,17 +31,16 @@ if ! command -v uv &> /dev/null; then
     source $HOME/.cargo/env
 fi
 
-# Extract public URL
 sleep 2
-PUBLIC_URL=$(grep -o "https://[a-zA-Z0-9.-]*\.trycloudflare\.com" /tmp/cloudflared.log 2>/dev/null | head -n 1)
+PUBLIC_URL=$(grep -o 'https://[a-zA-Z0-9.-]*\.trycloudflare\.com' /tmp/cloudflared.log 2>/dev/null | head -n 1)
 
 echo "=================================================="
-echo "🌐 رابط الموقع الأونلاين العام (من أي مكان/موبايل):"
+echo "🌐 رابط الموقع الأونلاين العام:"
 echo "👉 $PUBLIC_URL"
-echo "🏠 الرابط المحلي (Local): http://localhost:8080"
+echo "🏠 الرابط المحلي: http://localhost:8080"
 echo "=================================================="
 
-# Open browser with public URL
+# Open browser
 (sleep 1.5 && open "${PUBLIC_URL:-http://localhost:8080}") &
 
 # Run server with uv
