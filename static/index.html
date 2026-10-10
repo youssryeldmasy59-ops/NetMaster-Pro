@@ -466,6 +466,24 @@
 
             } catch(e) {
                 console.error("Error fetching devices:", e);
+                const container = document.getElementById('devices-container');
+                container.innerHTML = `
+                    <div class="col-span-full glass-card rounded-3xl p-6 border border-rose-500/40 bg-rose-950/20 text-center space-y-3">
+                        <i class="fa-solid fa-triangle-exclamation text-3xl text-rose-400"></i>
+                        <h4 class="font-bold text-white text-base">جارٍ الاتصال بسيرفر التحكم المحلي في بيتك...</h4>
+                        <p class="text-xs text-slate-300 max-w-md mx-auto leading-relaxed">
+                            لو الصفحة معلقة، افتح الرابط المباشر السريع لتخطي كاش المتصفح:
+                        </p>
+                        <div class="pt-2 flex justify-center gap-3">
+                            <a href="https://meant-investigators-specification-fiction.trycloudflare.com" target="_blank" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 text-white font-bold text-xs shadow-lg">
+                                فتح الرابط المباشر السريع 🚀
+                            </a>
+                            <button onclick="fetchDevices()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold">
+                                إعادة المحاولة 🔄
+                            </button>
+                        </div>
+                    </div>
+                `;
             }
         }
 
