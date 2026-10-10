@@ -251,6 +251,9 @@
 
     <script>
         let currentTargetIp = null;
+        let API_BASE = window.location.hostname.includes('github.io') 
+            ? 'https://meant-investigators-specification-fiction.trycloudflare.com' 
+            : '';
 
         function showToast(msg) {
             const toast = document.getElementById('toast');
@@ -289,7 +292,7 @@
                 return;
             }
             try {
-                const res = await fetch('/api/throttle', {
+                const res = await fetch(API_BASE + '/api/throttle', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ip: currentTargetIp, rate_kbps: speed})
@@ -306,7 +309,7 @@
         async function blockDevice(ip) {
             if (!confirm(`هل أنت متأكد من قطع النت تماماً عن الجهاز (${ip})؟`)) return;
             try {
-                const res = await fetch('/api/block', {
+                const res = await fetch(API_BASE + '/api/block', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ip})
@@ -321,7 +324,7 @@
 
         async function unblockDevice(ip) {
             try {
-                const res = await fetch('/api/unblock', {
+                const res = await fetch(API_BASE + '/api/unblock', {
                     method: 'POST',
                     headers: {'Content-Type': 'application/json'},
                     body: JSON.stringify({ip})
@@ -338,7 +341,7 @@
             const icon = document.getElementById('scan-icon');
             icon.classList.add('fa-spin');
             try {
-                const res = await fetch('/api/scan', {method: 'POST'});
+                const res = await fetch(API_BASE + '/api/scan', {method: 'POST'});
                 const data = await res.json();
                 showToast(data.message);
                 setTimeout(fetchDevices, 2000);
@@ -362,8 +365,8 @@
         async function fetchDevices() {
             try {
                 const [infoRes, devRes] = await Promise.all([
-                    fetch('/api/info'),
-                    fetch('/api/devices')
+                    fetch(API_BASE + '/api/info'),
+                    fetch(API_BASE + '/api/devices')
                 ]);
                 const info = await infoRes.json();
                 const devices = await devRes.json();
