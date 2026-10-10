@@ -251,9 +251,53 @@
 
     <script>
         let currentTargetIp = null;
-        let API_BASE = window.location.hostname.includes('github.io') 
-            ? 'https://remix-suspected-gently-designing.trycloudflare.com' 
-            : '';
+        // Auto-detect API base: if running locally, use same origin. 
+        // If on GitHub Pages, must connect to local server tunnel
+        let API_BASE = '';
+        let TUNNEL_URL = '';
+        
+        async function detectApiBase() {
+            // If we're already on the server (localhost or tunnel), use same origin
+            if (!window.location.hostname.includes('github.io')) {
+                API_BASE = '';
+                return;
+            }
+            
+            // On GitHub Pages: try to connect to local server
+            // First try localhost (if user opened from same machine)
+            const localUrls = ['http://localhost:8080', 'http://127.0.0.1:8080'];
+            for (const url of localUrls) {
+                try {
+                    const res = await fetch(url + '/api/info', {signal: AbortSignal.timeout(2000)});
+                    if (res.ok) {
+                        API_BASE = url;
+                        console.log('✅ Connected to local server:', url);
+                        return;
+                    }
+                } catch(e) {}
+            }
+            
+            // Show connection instructions
+            const container = document.getElementById('devices-container');
+            container.innerHTML = `
+                <div class="col-span-full glass-card rounded-3xl p-8 border border-amber-500/40 bg-amber-950/20 text-center space-y-4">
+                    <i class="fa-solid fa-plug-circle-exclamation text-4xl text-amber-400"></i>
+                    <h4 class="font-bold text-white text-lg">السيرفر المحلي مش شغّال!</h4>
+                    <p class="text-sm text-slate-300 max-w-lg mx-auto leading-relaxed">
+                        التحكم في الشبكة يحتاج السيرفر يكون شغّال على جهازك (الماك).<br>
+                        افتح Terminal وشغّل الأمر ده:
+                    </p>
+                    <div class="bg-slate-900 rounded-xl p-4 font-mono text-sm text-emerald-400 text-left direction-ltr" dir="ltr">
+                        cd ~/Downloads/NetMaster-Dashboard && sudo ./run.sh
+                    </div>
+                    <p class="text-xs text-slate-400">بعد ما السيرفر يشتغل، ارجع اعمل refresh للصفحة دي</p>
+                    <button onclick="location.reload()" class="px-6 py-3 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 text-white font-bold text-sm shadow-lg">
+                        إعادة المحاولة 🔄
+                    </button>
+                </div>
+            `;
+        }
+        detectApiBase();
 
         function showToast(msg) {
             const toast = document.getElementById('toast');
@@ -494,15 +538,15 @@
                 container.innerHTML = `
                     <div class="col-span-full glass-card rounded-3xl p-6 border border-rose-500/40 bg-rose-950/20 text-center space-y-3">
                         <i class="fa-solid fa-triangle-exclamation text-3xl text-rose-400"></i>
-                        <h4 class="font-bold text-white text-base">جارٍ الاتصال بسيرفر التحكم المحلي في بيتك...</h4>
+                        <h4 class="font-bold text-white text-base">مش قادر يوصل للسيرفر المحلي</h4>
                         <p class="text-xs text-slate-300 max-w-md mx-auto leading-relaxed">
-                            لو الصفحة معلقة، افتح الرابط المباشر السريع لتخطي كاش المتصفح:
+                            تأكد إن السيرفر شغّال على الماك بتاعك بالأمر ده:
                         </p>
+                        <div class="bg-slate-900 rounded-xl p-3 font-mono text-xs text-emerald-400" dir="ltr">
+                            cd ~/Downloads/NetMaster-Dashboard && sudo ./run.sh
+                        </div>
                         <div class="pt-2 flex justify-center gap-3">
-                            <a href="https://meant-investigators-specification-fiction.trycloudflare.com" target="_blank" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 text-white font-bold text-xs shadow-lg">
-                                فتح الرابط المباشر السريع 🚀
-                            </a>
-                            <button onclick="fetchDevices()" class="px-4 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-200 text-xs font-semibold">
+                            <button onclick="fetchDevices()" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-indigo-600 to-cyan-600 text-white text-xs font-bold shadow-lg">
                                 إعادة المحاولة 🔄
                             </button>
                         </div>

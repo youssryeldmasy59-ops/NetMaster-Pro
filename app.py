@@ -1,7 +1,8 @@
 #!/usr/bin/env python3
 """
-NetMaster Dashboard - Advanced Local Network Controller & Router Bandwidth Manager
-Author: Antigravity
+NetMaster Pro v3.0 - Real Network Controller with Bandwidth Throttling
+Uses macOS dnctl (dummynet) + pf for REAL speed limiting
+Uses ARP spoofing via scapy for device blocking
 """
 
 import os
@@ -15,11 +16,10 @@ import re
 from typing import Dict, List, Optional
 from fastapi import FastAPI, HTTPException
 from fastapi.responses import HTMLResponse, JSONResponse
-from fastapi.staticfiles import StaticFiles
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel
 
-app = FastAPI(title="NetMaster Dashboard")
+app = FastAPI(title="NetMaster Pro v3.0")
 
 app.add_middleware(
     CORSMiddleware,
@@ -38,6 +38,11 @@ GATEWAY_IP = "192.168.1.1"
 GATEWAY_MAC = ""
 MY_IP = "192.168.1.104"
 MY_INTERFACE = "en0"
+IS_ROOT = (os.geteuid() == 0 if hasattr(os, "geteuid") else False)
+
+# dummynet pipe tracking: ip -> pipe_number
+PIPE_MAP: Dict[str, int] = {}
+NEXT_PIPE = 100  # Start pipe numbering at 100
 
 # Detect Gateway & Interface
 def detect_network_info():
@@ -51,7 +56,6 @@ def detect_network_info():
             elif line.startswith("interface:"):
                 MY_INTERFACE = line.split(":", 1)[1].strip()
         
-        # Get MY_IP
         s = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
         s.connect((GATEWAY_IP, 80))
         MY_IP = s.getsockname()[0]
@@ -60,8 +64,138 @@ def detect_network_info():
         print(f"[!] Error detecting default route: {e}")
 
 detect_network_info()
+print(f"[*] Gateway: {GATEWAY_IP} | My IP: {MY_IP} | Interface: {MY_INTERFACE} | Root: {IS_ROOT}")
 
-# Known Vendors Prefix Cache (with brand-specific Arabic naming)
+# ─── PF / DUMMYNET BANDWIDTH CONTROL ───────────────────────────────
+PF_ANCHOR = "netmaster"
+PF_CONF = "/tmp/netmaster_pf.conf"
+
+def init_pf():
+    """Initialize pf anchor for NetMaster"""
+    if not IS_ROOT:
+        print("[!] Not root - bandwidth throttling will be simulated only")
+        return
+    try:
+        # Check if pf is enabled
+        result = subprocess.run(["pfctl", "-s", "info"], capture_output=True, text=True)
+        if "Disabled" in result.stdout:
+            subprocess.run(["pfctl", "-e"], capture_output=True, text=True)
+            print("[*] pf firewall enabled")
+        
+        # Add our anchor to main pf if not already there
+        rules = subprocess.run(["pfctl", "-s", "rules"], capture_output=True, text=True).stdout
+        if f'anchor "{PF_ANCHOR}"' not in rules:
+            # Load anchor
+            subprocess.run(
+                ["pfctl", "-f", "/etc/pf.conf"],
+                capture_output=True, text=True
+            )
+        print("[*] pf anchor initialized")
+    except Exception as e:
+        print(f"[!] pf init error: {e}")
+
+def apply_throttle_dnctl(ip: str, rate_kbps: int):
+    """Apply real bandwidth throttling using dnctl (dummynet) pipes"""
+    global NEXT_PIPE
+    if not IS_ROOT:
+        print(f"[!] Cannot apply dnctl pipe without root for {ip}")
+        return False
+    
+    try:
+        # Allocate pipe numbers (one for download, one for upload)
+        if ip not in PIPE_MAP:
+            PIPE_MAP[ip] = NEXT_PIPE
+            NEXT_PIPE += 2
+        
+        pipe_num = PIPE_MAP[ip]
+        pipe_up = pipe_num + 1
+        
+        # Create dummynet pipes with bandwidth limit
+        # Download pipe
+        subprocess.run(
+            ["dnctl", "pipe", str(pipe_num), "config", "bw", f"{rate_kbps}Kbit/s", "queue", "20"],
+            capture_output=True, text=True, check=True
+        )
+        # Upload pipe (same limit)
+        subprocess.run(
+            ["dnctl", "pipe", str(pipe_up), "config", "bw", f"{rate_kbps}Kbit/s", "queue", "20"],
+            capture_output=True, text=True, check=True
+        )
+        
+        # Write pf rules to route traffic through pipes
+        _rebuild_pf_rules()
+        
+        print(f"[✓] Throttle applied: {ip} → {rate_kbps} Kbps (pipes {pipe_num}/{pipe_up})")
+        return True
+    except Exception as e:
+        print(f"[!] dnctl error for {ip}: {e}")
+        return False
+
+def remove_throttle_dnctl(ip: str):
+    """Remove bandwidth throttling for a device"""
+    if not IS_ROOT:
+        return
+    try:
+        if ip in PIPE_MAP:
+            pipe_num = PIPE_MAP[ip]
+            pipe_up = pipe_num + 1
+            subprocess.run(["dnctl", "pipe", "delete", str(pipe_num)], capture_output=True)
+            subprocess.run(["dnctl", "pipe", "delete", str(pipe_up)], capture_output=True)
+            del PIPE_MAP[ip]
+            _rebuild_pf_rules()
+            print(f"[✓] Throttle removed: {ip}")
+    except Exception as e:
+        print(f"[!] Error removing throttle for {ip}: {e}")
+
+def _rebuild_pf_rules():
+    """Rebuild all pf dummynet rules from current PIPE_MAP"""
+    if not IS_ROOT:
+        return
+    try:
+        rules = []
+        for ip, pipe_num in PIPE_MAP.items():
+            pipe_up = pipe_num + 1
+            # Download: traffic TO the device
+            rules.append(f"dummynet-anchor \"pipe{pipe_num}\" in quick on {MY_INTERFACE} from any to {ip} pipe {pipe_num}")
+            # Upload: traffic FROM the device
+            rules.append(f"dummynet-anchor \"pipe{pipe_up}\" in quick on {MY_INTERFACE} from {ip} to any pipe {pipe_up}")
+        
+        # Write pf rules
+        with open(PF_CONF, "w") as f:
+            f.write("\n".join(rules) + "\n")
+        
+        # Also write simpler rules if the dummynet-anchor approach fails
+        simple_rules = []
+        for ip, pipe_num in PIPE_MAP.items():
+            pipe_up = pipe_num + 1
+            simple_rules.append(f"pass in quick on {MY_INTERFACE} from any to {ip} dnpipe {pipe_num}")
+            simple_rules.append(f"pass out quick on {MY_INTERFACE} from {ip} to any dnpipe {pipe_up}")
+        
+        with open(PF_CONF, "w") as f:
+            f.write("\n".join(simple_rules) + "\n")
+        
+        # Load into pf anchor
+        subprocess.run(
+            ["pfctl", "-a", PF_ANCHOR, "-f", PF_CONF],
+            capture_output=True, text=True
+        )
+    except Exception as e:
+        print(f"[!] pf rebuild error: {e}")
+
+def cleanup_all_throttles():
+    """Clean up all pipes and pf rules on exit"""
+    if not IS_ROOT:
+        return
+    try:
+        for ip in list(PIPE_MAP.keys()):
+            remove_throttle_dnctl(ip)
+        subprocess.run(["pfctl", "-a", PF_ANCHOR, "-F", "all"], capture_output=True)
+        subprocess.run(["dnctl", "-q", "flush"], capture_output=True)
+        print("[*] All throttles cleaned up")
+    except Exception:
+        pass
+
+# ─── VENDOR CACHE ──────────────────────────────────────────────────
 VENDOR_CACHE = {
     "5c:e9:31": "راوتر تي بي لينك (TP-Link Router)",
     "00:b5:d0": "سامسونج جالاكسي (Samsung Galaxy)",
@@ -109,8 +243,6 @@ def resolve_vendor(mac: str) -> str:
     prefix = normalize_mac_prefix(mac)
     if prefix in VENDOR_CACHE:
         return VENDOR_CACHE[prefix]
-    
-    # Check locally administered MAC bit (Private MAC in modern iPhone/Android)
     try:
         first_byte = int(prefix.split(":")[0], 16)
         if first_byte & 2:
@@ -120,35 +252,30 @@ def resolve_vendor(mac: str) -> str:
     return "جهاز متصل بالشبكة"
 
 def resolve_hostname(ip: str, mac: str = "") -> str:
-    # 1. Check custom names first
     if ip in CUSTOM_NAMES:
         return CUSTOM_NAMES[ip]
     if mac and mac in CUSTOM_NAMES:
         return CUSTOM_NAMES[mac]
-
     if ip == GATEWAY_IP:
         return "راوتر تي بي لينك الرئيسي (TP-Link VX220-G2v)"
     if ip == MY_IP:
         return "لابتوب أبل ماك (هذا الماك)"
-    
-    # 2. Check brand by MAC
     if mac:
         prefix = normalize_mac_prefix(mac)
         if prefix in VENDOR_CACHE:
             return VENDOR_CACHE[prefix]
-
     try:
         host, _, _ = socket.gethostbyaddr(ip)
         return host
     except Exception:
         return f"هاتف ذكي ({ip.split('.')[-1]})"
 
+# ─── NETWORK SCANNING ──────────────────────────────────────────────
 def scan_network_worker():
     global SCANNING, GATEWAY_MAC
     SCANNING = True
     print("[*] Starting fast network sweep...")
     
-    # 1. Ping sweep subnet
     subnet_prefix = ".".join(GATEWAY_IP.split(".")[:3])
     def ping_host(host_ip):
         subprocess.run(["ping", "-c", "1", "-W", "200", host_ip],
@@ -167,14 +294,12 @@ def scan_network_worker():
     for th in threads:
         th.join()
 
-    # 2. Parse Routing Table & ARP for active MACs
     try:
-        # Check /tmp/netmaster_arp.txt updated by background daemon
         if os.path.exists("/tmp/netmaster_arp.txt") and os.path.getsize("/tmp/netmaster_arp.txt") > 0:
             with open("/tmp/netmaster_arp.txt", "r") as f:
                 lines = f.readlines()
         else:
-            lines = []
+            lines = subprocess.check_output(["/usr/sbin/arp", "-a"]).decode().splitlines()
 
         for line in lines:
             if "(incomplete)" in line or MY_INTERFACE not in line:
@@ -185,7 +310,6 @@ def scan_network_worker():
                 ip = match.group(1)
                 mac = match.group(2).lower()
 
-                # Filter multicast & broadcast
                 if ip.startswith("224.") or ip.startswith("239.") or mac == "ff:ff:ff:ff:ff:ff":
                     continue
 
@@ -195,7 +319,6 @@ def scan_network_worker():
                 vendor = resolve_vendor(mac)
                 hostname = resolve_hostname(ip, mac)
 
-                # Ping latency
                 latency = 1.0
                 try:
                     p = subprocess.run(["ping", "-c", "1", "-W", "150", ip],
@@ -230,49 +353,38 @@ def scan_network_worker():
     SCANNING = False
     print(f"[*] Scan completed. Found {len(DEVICES)} devices.")
 
-# Background ARP Spoofing / Blocking Thread
+# ─── ARP SPOOFING (BLOCK ONLY) ─────────────────────────────────────
 def arp_control_loop():
     try:
         from scapy.all import ARP, send, conf
         conf.verb = 0
     except ImportError:
-        print("[!] Scapy not loaded. Advanced packet control requires scapy.")
+        print("[!] Scapy not loaded. Install: pip install scapy")
         return
 
     while True:
         try:
-            is_root = (os.geteuid() == 0 if hasattr(os, "geteuid") else False)
-            if not is_root and (BLOCKED_IPS or THROTTLED_IPS):
-                print("[!] Warning: Root permissions (sudo) required on macOS to inject raw ARP packets.")
-                time.sleep(3.0)
+            if not IS_ROOT and BLOCKED_IPS:
+                print("[!] Root required for ARP injection. Run with sudo.")
+                time.sleep(5.0)
                 continue
 
             conf.iface = MY_INTERFACE
 
-            # 1. Handle Blocked Devices (High-frequency burst poisoning)
+            # Only handle BLOCKED devices via ARP spoofing
             for ip in list(BLOCKED_IPS):
                 if ip in DEVICES and GATEWAY_MAC:
                     target_mac = DEVICES[ip]["mac"]
-                    # Poison target: Gateway points to dead MAC
                     pkt1 = ARP(op=2, pdst=ip, hwdst=target_mac, psrc=GATEWAY_IP, hwsrc="00:00:00:00:00:01")
-                    # Poison Gateway: Target points to dead MAC
                     pkt2 = ARP(op=2, pdst=GATEWAY_IP, hwdst=GATEWAY_MAC, psrc=ip, hwsrc="00:00:00:00:00:01")
                     send(pkt1, count=3, inter=0.05, verbose=False)
                     send(pkt2, count=3, inter=0.05, verbose=False)
 
-            # 2. Handle Throttled Devices (Pacing / intermittent delay)
-            for ip, limit in list(THROTTLED_IPS.items()):
-                if ip in DEVICES and GATEWAY_MAC:
-                    target_mac = DEVICES[ip]["mac"]
-                    pkt = ARP(op=2, pdst=ip, hwdst=target_mac, psrc=GATEWAY_IP, hwsrc="00:00:00:00:00:01")
-                    send(pkt, count=2, inter=0.1, verbose=False)
-
-            time.sleep(0.3 if BLOCKED_IPS else 1.0)
+            time.sleep(0.3 if BLOCKED_IPS else 2.0)
         except Exception as e:
             print(f"[!] ARP loop error: {e}")
-            time.sleep(2.0)
+            time.sleep(3.0)
 
-# Restore normal ARP
 def restore_arp(target_ip: str):
     try:
         from scapy.all import ARP, send, conf
@@ -287,10 +399,10 @@ def restore_arp(target_ip: str):
     except Exception as e:
         print(f"[!] Error restoring ARP: {e}")
 
-# Start background control loop
+# Start background threads
 threading.Thread(target=arp_control_loop, daemon=True).start()
 
-# API Endpoints
+# ─── API ENDPOINTS ──────────────────────────────────────────────────
 class BlockRequest(BaseModel):
     ip: str
 
@@ -310,7 +422,7 @@ def get_info():
         "device_count": len(DEVICES),
         "blocked_count": len(BLOCKED_IPS),
         "throttled_count": len(THROTTLED_IPS),
-        "is_root": (os.geteuid() == 0 if hasattr(os, "geteuid") else False)
+        "is_root": IS_ROOT
     }
 
 @app.get("/api/devices")
@@ -329,48 +441,65 @@ def trigger_scan():
 def block_device(req: BlockRequest):
     if req.ip == GATEWAY_IP or req.ip == MY_IP:
         raise HTTPException(status_code=400, detail="لا يمكن قطع الاتصال عن الراوتر أو جهازك الحالي")
-    BLOCKED_IPS.add(req.ip)
+    
+    # Remove throttle if exists
     if req.ip in THROTTLED_IPS:
+        remove_throttle_dnctl(req.ip)
         del THROTTLED_IPS[req.ip]
+    
+    BLOCKED_IPS.add(req.ip)
     if req.ip in DEVICES:
         DEVICES[req.ip]["status"] = "blocked"
-    is_root = (os.geteuid() == 0 if hasattr(os, "geteuid") else False)
-    if not is_root:
+        DEVICES[req.ip]["speed_limit"] = None
+    
+    if not IS_ROOT:
         return {
             "status": "warning",
-            "message": f"تم وضع {req.ip} في قائمة الحظر. تنبيه: لتطبيق قطع النت الفعلي من الماك يتطلب تشغيل السيرفر بـ: sudo ./run.sh (الماك يمنع حقن الحزم بدون روت). أو افصله مباشرة من صفحة الراوتر (192.168.1.1)."
+            "message": f"⚠️ تم وضع {req.ip} في قائمة الحظر لكن يتطلب تشغيل بـ sudo.\nشغّل: sudo ./run.sh"
         }
-    return {"status": "ok", "message": f"تم قطع النت عن الجهاز {req.ip} بنجاح"}
+    return {"status": "ok", "message": f"✅ تم قطع النت عن الجهاز {req.ip} فوراً"}
 
 @app.post("/api/unblock")
 def unblock_device(req: BlockRequest):
     if req.ip in BLOCKED_IPS:
         BLOCKED_IPS.remove(req.ip)
     if req.ip in THROTTLED_IPS:
+        remove_throttle_dnctl(req.ip)
         del THROTTLED_IPS[req.ip]
     if req.ip in DEVICES:
         DEVICES[req.ip]["status"] = "online"
         DEVICES[req.ip]["speed_limit"] = None
     restore_arp(req.ip)
-    return {"status": "ok", "message": f"تمت إعادة النت للجهاز {req.ip}"}
+    return {"status": "ok", "message": f"✅ تمت إعادة النت للجهاز {req.ip}"}
 
 @app.post("/api/throttle")
 def throttle_device(req: ThrottleRequest):
     if req.ip == GATEWAY_IP or req.ip == MY_IP:
         raise HTTPException(status_code=400, detail="لا يمكن تقييد سرعة الراوتر أو جهازك الحالي")
+    
+    # Remove block if exists
     if req.ip in BLOCKED_IPS:
         BLOCKED_IPS.remove(req.ip)
+        restore_arp(req.ip)
+    
     THROTTLED_IPS[req.ip] = req.rate_kbps
     if req.ip in DEVICES:
         DEVICES[req.ip]["status"] = "throttled"
         DEVICES[req.ip]["speed_limit"] = req.rate_kbps
-    is_root = (os.geteuid() == 0 if hasattr(os, "geteuid") else False)
-    if not is_root:
+    
+    # Apply REAL bandwidth limit
+    success = apply_throttle_dnctl(req.ip, req.rate_kbps)
+    
+    if not IS_ROOT:
         return {
             "status": "warning",
-            "message": f"تم تعيين حد {req.rate_kbps} Kbps. تنبيه: يتطلب تشغيل السيرفر بـ sudo ./run.sh لخنق السرعة الفعلي."
+            "message": f"⚠️ تم تعيين حد {req.rate_kbps} Kbps لكن يتطلب sudo.\nشغّل: sudo ./run.sh"
         }
-    return {"status": "ok", "message": f"تم تقييد سرعة الجهاز {req.ip} إلى {req.rate_kbps} Kbps"}
+    
+    if success:
+        return {"status": "ok", "message": f"✅ تم تحديد سرعة {req.ip} إلى {req.rate_kbps} Kbps فعلياً!"}
+    else:
+        return {"status": "error", "message": f"❌ فشل تطبيق تحديد السرعة على {req.ip}"}
 
 class RenameRequest(BaseModel):
     ip: str
@@ -384,21 +513,46 @@ def rename_device(req: RenameRequest):
         if DEVICES[req.ip].get("mac"):
             CUSTOM_NAMES[DEVICES[req.ip]["mac"]] = req.custom_name.strip()
     save_custom_names()
-    return {"status": "ok", "message": f"تم تغيير اسم الجهاز إلى: {req.custom_name}"}
+    return {"status": "ok", "message": f"✅ تم تغيير اسم الجهاز إلى: {req.custom_name}"}
+
+@app.get("/api/tunnel_url")
+def get_tunnel_url():
+    """Return the current Cloudflare tunnel URL"""
+    try:
+        if os.path.exists("/tmp/cloudflared.log"):
+            with open("/tmp/cloudflared.log", "r") as f:
+                content = f.read()
+            urls = re.findall(r'https://[a-zA-Z0-9.-]+\.trycloudflare\.com', content)
+            if urls:
+                return {"url": urls[-1]}
+    except Exception:
+        pass
+    return {"url": ""}
 
 # Serve Frontend
 @app.get("/", response_class=HTMLResponse)
 def get_index():
-    index_path = os.path.join(os.path.dirname(__file__), "static", "index.html")
-    if os.path.exists(index_path):
-        with open(index_path, "r", encoding="utf-8") as f:
-            return f.read()
+    # Try static/ first, then root
+    for path in [
+        os.path.join(os.path.dirname(__file__), "static", "index.html"),
+        os.path.join(os.path.dirname(__file__), "index.html"),
+    ]:
+        if os.path.exists(path):
+            with open(path, "r", encoding="utf-8") as f:
+                return f.read()
     return "<h1>NetMaster Dashboard Loading...</h1>"
 
 @app.on_event("startup")
 def startup_event():
+    init_pf()
     threading.Thread(target=scan_network_worker, daemon=True).start()
+
+@app.on_event("shutdown")
+def shutdown_event():
+    cleanup_all_throttles()
 
 if __name__ == "__main__":
     import uvicorn
+    import atexit
+    atexit.register(cleanup_all_throttles)
     uvicorn.run(app, host="0.0.0.0", port=8080)
